@@ -1,0 +1,34 @@
+# venv
+.venv/
+bin/
+include/
+lib/
+lib64/
+lib64
+etc/
+include/
+share/
+pyvenv.cfg
+
+# Compiled files
+__pycache__/
+_ext
+*.pyc
+*.pyd
+*.so
+*.dll
+*.egg-info/
+build/
+dist/
+wheels/
+
+# pytorch/python/numpy format
+*.pth
+*.pkl
+*.npy
+*.ts
+model_ts*.txt
+
+# VScode
+.vscode/
+
