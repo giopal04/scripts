@@ -13,6 +13,7 @@ color_map = {
         150: [  0, 255,   0], # Class 2 - trees         (green)
         200: [  0,   0, 255], # Class 3 - cube          (red)
          38: [  0,   0, 255], # Class 4 - crack         (red)
+        255: [  0,   0, 255], # Class 4 - crack         (red)
         # Add more classes as needed
 }
 
@@ -47,7 +48,7 @@ def put_text(img, ft, txt, pt, c=(255, 255, 255, 0), sz="medium", thickness=2.0,
 			   bottomLeftOrigin=False)
 		return img
 
-def resize_and_pad(img, target_width, target_height, resize=True):
+def resize_and_pad(img, target_width, target_height, resize=True, debug=False):
 	"""Resize image while maintaining aspect ratio and pad to target dimensions."""
 	if img is None:
 		return np.zeros((target_height, target_width, 3), 0, 0)
@@ -68,7 +69,8 @@ def resize_and_pad(img, target_width, target_height, resize=True):
 	pad_bottom =  target_height - new_h - pad_top
 	pad_left   = (target_width  - new_w) // 2
 	pad_right  =  target_width  - new_w - pad_left
-	print(f'{new_w = }, {new_h = }, {pad_top = }, {pad_bottom = }, {pad_left = }, {pad_right = }')
+	if debug:
+		print(f'{new_w = }, {new_h = }, {pad_top = }, {pad_bottom = }, {pad_left = }, {pad_right = }')
 	
 	if resize:
 		resized = cv2.resize(img, (new_w, new_h))
@@ -100,6 +102,7 @@ def create_overlay(image, mask, alpha=0.5, debug=False):
 		print(f'color_map = {color_map}')
 		print(f'mask.shape = {mask.shape}')
 		print(f'mask: {mask[mask > 0]}')
+	print(f'non-null uniques in mask: {np.unique(mask[mask > 0])}')
 
 	# Apply the color map to the mask
 	for class_id, color in color_map.items():
