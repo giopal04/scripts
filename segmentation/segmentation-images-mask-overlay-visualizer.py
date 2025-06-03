@@ -14,6 +14,7 @@ color_map = {
         200: [  0,   0, 255], # Class 3 - cube          (red)
          38: [  0,   0, 255], # Class 4 - crack         (red)
         255: [  0,   0, 255], # Class 4 - crack         (red)
+         81: [  0,   0, 255], # Class 4 - crack         (red)
         # Add more classes as needed
 }
 
@@ -114,9 +115,9 @@ def create_overlay(image, mask, alpha=0.5, debug=False):
 
 def find_pairs(root_dir):
 	"""Find matching image/mask pairs in directory structure."""
-	image_dirs = ['img', 'image', 'images', 'RGB', 'rgb']
-	mask_dirs = ['mask', 'masks', 'segmentation', 'seg']
-	img_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif']
+	image_dirs = ['img',  'image', 'RGB', 'rgb', 'images']
+	mask_dirs  = ['mask', 'masks', 'seg', 'segmentation']
+	img_exts   = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif']
 	
 	image_files = {}
 	mask_files = {}
@@ -137,7 +138,7 @@ def find_pairs(root_dir):
 				for mask_path in d.glob(f'*{ext}'):
 					key = mask_path.stem
 					if key not in mask_files:
-						mask_files[key] = mask_path
+						mask_files[key.replace('_mask', '')] = mask_path
 	
 	# Create pairs where both exist
 	pairs = []
