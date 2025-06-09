@@ -40,10 +40,10 @@ def main():
         help="Path to save the aggregated COCO JSON file.",
     )
     parser.add_argument(
-        "--image_extension",
+        "--image_extensions",
         type=str,
         default=".jpg",
-        help="The extension of the original image files (e.g., .jpg, .png)."
+        help="Comma-separated list of the extension(s) of the original image files (e.g., .jpg,.jpeg,.png)."
     )
     args = parser.parse_args()
 
@@ -93,12 +93,17 @@ def main():
     image_id_counter = 0
     annotation_id_counter = 0
 
-    annotation_files = sorted(list(args.input_dir.glob(f"*{args.image_extension}.json")))
-    if not annotation_files:
-        print(f"No '*{args.image_extension}.json' files found in {args.input_dir}")
-        return
+    annotation_files = []
+    for ext in args.image_extensions.split(","):
+        print(f'Looking for "*{ext}.json" files in {args.input_dir}')
+        found_files = sorted(list(args.input_dir.glob(f"*{ext}.json")))
+        annotation_files.extend(found_files)
+        if not found_files:
+            print(f"No '*{ext}.json' files found in {args.input_dir}")
 
     print(f"Found {len(annotation_files)} annotation files.")
+    if len(annotation_files) == 0:
+        return
 
     for ann_file_path in annotation_files:
         print(f"Processing {ann_file_path.name}...")
