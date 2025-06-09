@@ -43,7 +43,7 @@ class Text:
         
         elif isinstance(self.text, numpy.ndarray):
             to_print = (f'{self.name} type = {type(self.text)}\n',
-                        f'{self.name} device = {self.text.device}\n',
+                        #f'{self.name} device = {self.text.device}\n',
                         f'{self.name} dtype = {self.text.dtype}\n',
                         f'{self.name} shape = {self.text.shape}')
 
@@ -60,7 +60,7 @@ class Text:
         if isinstance(self.text, torch.Tensor):
             _max = torch.max(self.text)
             _min = torch.min(self.text)
-            _mean = torch.mean(self.text)
+            _mean = torch.mean(self.text.float())
         
         elif isinstance(self.text, numpy.ndarray):
             _max = numpy.max(self.text)
