@@ -189,6 +189,7 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			new_mask_stem	= f"{file_path.stem}-mask-{cls.shape[0]}-{cls.shape[1]}"
 			log_entries.append(f"{file_path.stem} - {cls.shape} - {conf.shape}")
 			new_blend_path	= output_dir / f"{new_blend_stem}{file_path.suffix}"
+			new_blend_spath	= output_dir / f"{new_blend_stem}-scaled{file_path.suffix}"
 			new_blend_opath	= output_dir / f"{new_blend_stem}-orig{file_path.suffix}"
 			new_mask_path	= output_dir / f"{new_mask_stem}.png"
 			mask		= cls.cpu().numpy().astype(np.uint8)
@@ -204,6 +205,9 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			print(f'{Text(batch_itm, "batch_itm"):inspect}')
 			batch_img	= np.asarray(to_image(batch_itm))
 			#print(f'{Text(batch_img, "batch_img"):inspect}')
+			scaled_img	= cv2.resize(img, (mask.shape[1], mask.shape[0]), interpolation=cv2.INTER_AREA)
+			blend_scaled	= overlay(scaled_img, mask)
+			cv2.imwrite(new_blend_spath, blend_scaled)
 			blend_orig	= overlay(batch_img, mask)
 			cv2.imwrite(new_blend_opath, blend_orig)
 
