@@ -4,6 +4,8 @@
 
 # ./fast.ai-inference-ViT-segmentation.py --input_dir images --output_dir output --model_path models/surface-damage-segmentation-CH-UNet-vit_tiny_patch16_224-basic-data-aug-img_size-270-270-1b-2025-05-12_14.49.03-WD-0.0001-BS-4-LR-0.0001-0.001-epoch-3-valid_loss-0.1767.pth --batch_size 16 --img_size 224 --arch vit_tiny_patch16_224 --num_classes 2
 
+# ./fast.ai-inference-ResNet-segmentation.py --model_path /mnt/raid1/repos/pothole-detection/models/pothole-segmentron-UNet-resnet101-basic-data-aug-img_size-540-540-1a-2025-05-22_18.35.22-WD-0.0001-BS-6-LR-0.0001-0.001-epoch-0-valid_loss-22.9389.pth --input_dir /tmp/potholes-train --output_dir /mnt/raid1/repos/pothole-detection/inference/bing-images-download/dataset/cracked-statue-inference --encoder ResNet-101 --batch_size 2 --device cuda:0 --num_classes 5 --img_size 540
+
 # Run classification inference with:
 
 # ./fast.ai-inference.py --input_dir /mnt/raid1/dataset/shrec-2025-protein-classification/v2-20250331/test-orig-renamed-labeled-screenshots/unk --output_dir /mnt/raid1/dataset/shrec-2025-protein-classification/v2-20250331/inference-test-set-labeled-screenshots --model_path /mnt/raid1/repos/shrec2025/Protein_Classification/notebooks/models/shrec-2025-protein-classification-resnet50--no-data-aug-img_size-320-320-1a-2025-04-04_12.15.05-BS-64-LR-0.0005-0.001-epoch-8-valid_loss-0.2962.pth --batch_size 64 --img_size 320 --device cuda:0 &> fast.ai-inference-on-test-set-`currdate`.txt
@@ -32,7 +34,7 @@ def parse_args():
     parser.add_argument('--batch_size',		type=int, default=4,			help='Inference batch size')
     parser.add_argument('--img_size',		type=int, default=518,			help='Inference image size (better if equal to training size)')
     parser.add_argument('--device',		type=str, default='cuda:0',		help='GPU to use')
-    parser.add_argument('--arch',		type=str, default='ResNet-50',		help='ResNet architecture to use')
+    parser.add_argument('--encoder',		type=str, default='ResNet-50',		help='ResNet encoder to use')
     parser.add_argument('--num_classes',	type=int, default=2,			help='Number of classes in the classification/segmentation problem')
 
     return parser.parse_args()
@@ -47,7 +49,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Load model
-    learn = load_model(input_dir, args.model_path, device, arch=args.arch, img_size=args.img_size, num_classes=args.num_classes, args=args, task=args.task)
+    learn = load_model(input_dir, args.model_path, device, encoder=args.encoder, img_size=args.img_size, bs=args.batch_size, num_classes=args.num_classes, args=args, task=args.task)
     learn.model.eval()
     
     # Create inference dataloader

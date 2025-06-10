@@ -4,6 +4,7 @@ import timm
 import torch
 import torch.nn.functional as F
 from fastai.vision.all import *
+from inspect import getmembers, isfunction
 
 import cv2
 
@@ -31,6 +32,7 @@ def overlay(frame, mask, alpha=0.5):
 	if len(mask.shape) < 3 or mask.shape[2] == 1:
 		mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 	if mask.shape != frame.shape:
+		print(f'mask.shape != frame.shape: {mask.shape} != {frame.shape}')
 		mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
 	return cv2.addWeighted(frame, 1, mask, alpha, 0)
 
@@ -39,7 +41,7 @@ def get_img_and_patch_size(arch_str):
 	pattern			= r"_patch[0-9][0-9]_"
 	patch_size		= re.findall(pattern, arch_str)[0]
 	patch_size		= int(patch_size.replace('patch', '').replace('_', ''))
-	if 'vit_giant_patch14_reg4_dinov2' in arch_str:				# https://huggingface.co/timm/vit_giant_patch14_reg4_dinov2.lvd142m
+	if 'vit_giant_patch14_reg4_dinov2' in arch_str or 'vit_large_patch14_reg4_dinov2' in arch_str:	# https://huggingface.co/timm/vit_giant_patch14_reg4_dinov2.lvd142m
 		vit_img_size	= 518
 	else:
 		pattern		= '_[0-9][0-9][0-9]$'
@@ -47,8 +49,15 @@ def get_img_and_patch_size(arch_str):
 		vit_img_size	= int(vit_img_size.replace('_', ''))		# final ViT size (e.g. 224), fixed
 	return vit_img_size, patch_size
 
+def find_backbone(backbone):
+    arch_lst = getmembers(models, isfunction)
+    print(f'Searching for backbone: {backbone}')
+    for arch in arch_lst:
+        if arch[0] == backbone:
+            print(f'Found arch: {arch[0]} - func: {arch[1]}')
+            return arch[1]
 
-def load_model(input_dir, model_path, device, encoder, img_size, num_classes, args, task='segmentation', decoder=None):
+def load_model(input_dir, model_path, device, encoder, img_size, bs, num_classes, args, task='segmentation', decoder=None):
 	# Create dummy dataloaders to initialize model architecture
 	dblock = DataBlock(blocks=(ImageBlock, CategoryBlock),
 					   get_items=get_image_files,
@@ -64,32 +73,52 @@ def load_model(input_dir, model_path, device, encoder, img_size, num_classes, ar
                 Jaccard(average='macro'),
               ]    
 	# Dummy dataloaders with 97 classes (matching your model output)
-	dls = dblock.dataloaders(input_dir, bs=4, num_classes=97)
-	
-	# Create learner and load weights
-	#learn = vision_learner(dls, resnet50, pretrained=False, n_out=97)
-	print(f'Allocating a ViT Learner. Type: {encoder}')
-	if task == 'classification':
-		model = timm.create_model(encoder, pretrained=True, num_classes=num_classes, dynamic_img_size=True)
-		print(f'{model = }')
-		learn = Learner(dls, model, loss_func=CrossEntropyLossFlat(), metrics=metrics, cbs=[MixedPrecision])
-	elif task == 'segmentation':
-		vit_img_size, patch_size = get_img_and_patch_size(encoder)
-		if args.segmenter_version == '1':
-			from segmenter import Segmenter
-			# model, cls, img_dim, patch_size, cut_enc=-3, cut_in_dec=4, cut_out_dec=-3
-			segmenter = Segmenter(model=encoder, cls=num_classes, img_dim = vit_img_size, patch_size=patch_size)
-		elif args.segmenter_version == '2':
-			from segmenter_v2 import Segmenter
-			# def __init__(self, backbone, cls, img_dim, patch_size, decoder=None, cut_enc=-3, cut_in_dec=4, cut_out_dec=-3)
-			# encoder: vit_large_patch16_224 - decoder: vit_small_patch16_224
-			segmenter = Segmenter(backbone=encoder, cls=num_classes, img_dim = vit_img_size, patch_size=patch_size, decoder=decoder)
+	#dls = dblock.dataloaders(input_dir, bs=4, num_classes=97)
+	dls = dblock.dataloaders(input_dir, bs=bs, num_classes=num_classes)
+
+	if 'ResNet' in encoder:
+		arch_func = find_backbone(encoder.lower().replace('-', ''))
+		print(f'Allocating a ResNet Learner. Type: {encoder} - {arch_func = }')
+		learn     = unet_learner(dls=dls, arch=arch_func, loss_func=CrossEntropyLossFlat(axis=1), metrics=metrics, self_attention=True, n_out=num_classes) #.to_fp16()
+		'''
+		if '101' in encoder:
+			enc_object = resnet101
+		elif '50' in encoder:
+			enc_object = resnet50
 		else:
-			raise ValueError(f"segmenter version '{args.segmenter_version}' not supported")
-		learn     = Learner(dls=dls, model=segmenter, loss_func=CrossEntropyLossFlat(axis=1), metrics=metrics, wd=1e-4).to_fp16()
+			print(f'Unknown encoder: {encoder}')
+			enc_object = None
+			return
+		learn = vision_learner(dls, enc_object, pretrained=False, n_out=5, loss_func=CrossEntropyLossFlat(), metrics=metrics, cbs=[MixedPrecision]).to_fp16()
+		'''
+	elif 'ViT' in encoder or 'vit' in encoder:
+		# Create learner and load weights
+		#learn = vision_learner(dls, resnet50, pretrained=False, n_out=97)
+		print(f'Allocating a ViT Learner. Type: {encoder}')
+		if task == 'classification':
+			model = timm.create_model(encoder, pretrained=True, num_classes=num_classes, dynamic_img_size=True)
+			print(f'{model = }')
+			learn = Learner(dls, model, loss_func=CrossEntropyLossFlat(), metrics=metrics, cbs=[MixedPrecision])
+		elif task == 'segmentation':
+			vit_img_size, patch_size = get_img_and_patch_size(encoder)
+			if args.segmenter_version == '1':
+				from segmenter import Segmenter
+				# model, cls, img_dim, patch_size, cut_enc=-3, cut_in_dec=4, cut_out_dec=-3
+				segmenter = Segmenter(model=encoder, cls=num_classes, img_dim = vit_img_size, patch_size=patch_size)
+			elif args.segmenter_version == '2':
+				from segmenter_v2 import Segmenter
+				# def __init__(self, backbone, cls, img_dim, patch_size, decoder=None, cut_enc=-3, cut_in_dec=4, cut_out_dec=-3)
+				# encoder: vit_large_patch16_224 - decoder: vit_small_patch16_224
+				segmenter = Segmenter(backbone=encoder, cls=num_classes, img_dim = vit_img_size, patch_size=patch_size, decoder=decoder)
+			else:
+				raise ValueError(f"segmenter version '{args.segmenter_version}' not supported")
+			learn     = Learner(dls=dls, model=segmenter, loss_func=CrossEntropyLossFlat(axis=1), metrics=metrics, wd=1e-4).to_fp16()
+		else:
+			raise ValueError(f"task '{task}' not supported")
+			#learn = vision_learner(dls, encoder, pretrained=False, n_out=97, loss_func=CrossEntropyLossFlat(), metrics=metrics, cbs=[MixedPrecision])
 	else:
-		raise ValueError(f"task '{task}' not supported")
-		#learn = vision_learner(dls, encoder, pretrained=False, n_out=97, loss_func=CrossEntropyLossFlat(), metrics=metrics, cbs=[MixedPrecision])
+		print(f'Unknown encoder: {encoder}')
+		return
 
 	#learn = vision_learner(dls, encoder, pretrained=False, n_out=97, loss_func=CrossEntropyLossFlat(), metrics=metrics, cbs=[MixedPrecision])
 	learn.model = learn.model.to(device)
@@ -117,6 +146,7 @@ def write_batch_log(log_entries, output_dir):
 
 def process_batch(batch, model, files, output_dir, device, args, debug=False):
 	with torch.no_grad():
+		print(f'{Text(batch, "batch"):inspect}')
 		preds = model(batch.to(device))
 		if debug:
 			#print(f'Predictions: {preds}')
@@ -133,7 +163,7 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			print(f'{clss[clss != 0].shape = }')
 
 	log_entries = []
-	for file_path, cls, conf in zip(files, clss.cpu(), confs.cpu()):
+	for file_path, cls, conf, batch_itm in zip(files, clss.cpu(), confs.cpu(), batch.cpu()):
 		src_path = Path(file_path)
 		file_id  = src_path.stem
 		fid = file_id.split('-')[0]			# e.g. obj 1040
@@ -159,6 +189,7 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			new_mask_stem	= f"{file_path.stem}-mask-{cls.shape[0]}-{cls.shape[1]}"
 			log_entries.append(f"{file_path.stem} - {cls.shape} - {conf.shape}")
 			new_blend_path	= output_dir / f"{new_blend_stem}{file_path.suffix}"
+			new_blend_opath	= output_dir / f"{new_blend_stem}-orig{file_path.suffix}"
 			new_mask_path	= output_dir / f"{new_mask_stem}.png"
 			mask		= cls.cpu().numpy().astype(np.uint8)
 			cv2.imwrite(new_mask_path, mask)
@@ -170,6 +201,11 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			mask		= change_mask_color(mask, (4, 4, 4), (  0, 255, 255))		# TODO: hardcoded! write an argparse entry for this!
 			blend		= overlay(img, mask)
 			cv2.imwrite(new_blend_path, blend)
+			print(f'{Text(batch_itm, "batch_itm"):inspect}')
+			batch_img	= np.asarray(to_image(batch_itm))
+			#print(f'{Text(batch_img, "batch_img"):inspect}')
+			blend_orig	= overlay(batch_img, mask)
+			cv2.imwrite(new_blend_opath, blend_orig)
 
 	# Write all entries for this batch
 	write_batch_log(log_entries, output_dir)
