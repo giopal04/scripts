@@ -28,6 +28,29 @@ def change_mask_color(img, from_c, to_c, debug=False):
 	img[mask>0] = tuple(to_c)
 	return img			# a mask, actually
 
+def center_crop(img, new_width=None, new_height=None):
+	# center-crop a PIL Image - https://stackoverflow.com/a/32385865/1396334
+	width  = img.shape[1]
+	height = img.shape[0]
+
+	if new_width is None:
+		new_width = min(width, height)
+
+	if new_height is None:
+		new_height = min(width, height)
+
+	left = int(np.ceil((width - new_width) / 2))
+	right = width - int(np.floor((width - new_width) / 2))
+
+	top = int(np.ceil((height - new_height) / 2))
+	bottom = height - int(np.floor((height - new_height) / 2))
+
+	if len(img.shape) == 2:
+		center_cropped_img = img[top:bottom, left:right]
+	else:
+		center_cropped_img = img[top:bottom, left:right, ...]
+
+	return center_cropped_img
 
 def overlay(frame, mask, alpha=0.5):
 	if len(mask.shape) < 3 or mask.shape[2] == 1:
@@ -203,14 +226,17 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			mask		= change_mask_color(mask, (4, 4, 4), (  0, 255, 255))		# TODO: hardcoded! write an argparse entry for this!
 			blend		= overlay(img, mask)
 			cv2.imwrite(new_blend_path, blend)
-			print(f'{Text(batch_itm, "batch_itm"):inspect}')
-			batch_img	= np.asarray(to_image(batch_itm))
+			print(f'{Text(batch_itm, "batch_itm"):content}')
+			#batch_img	= np.asarray(to_image(batch_itm))
+			#batch_img	= np.asarray(to_image(batch_itm))
 			#print(f'{Text(batch_img, "batch_img"):inspect}')
-			scaled_img	= cv2.resize(img, (mask.shape[1], mask.shape[0]), interpolation=cv2.INTER_AREA)
+			scaled_img	= cv2.resize(center_crop(img), (mask.shape[1], mask.shape[0]), interpolation=cv2.INTER_AREA)
 			blend_scaled	= overlay(scaled_img, mask)
 			cv2.imwrite(new_blend_spath, blend_scaled)
 			tfm2img		= T.ToPILImage()
-			blend_orig	= overlay(tfm2img(batch_img), mask)
+			batch_img	= np.asarray(tfm2img(batch_itm).convert('RGB'))
+			print(f'{Text(batch_img, "batch_img"):content}')
+			blend_orig	= overlay(batch_img, mask)
 			cv2.imwrite(new_blend_opath, blend_orig)
 
 	# Write all entries for this batch
