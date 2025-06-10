@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 from fastai.vision.all import *
 from inspect import getmembers, isfunction
+import torchvision.transforms as T
 
 import cv2
 
@@ -208,7 +209,8 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			scaled_img	= cv2.resize(img, (mask.shape[1], mask.shape[0]), interpolation=cv2.INTER_AREA)
 			blend_scaled	= overlay(scaled_img, mask)
 			cv2.imwrite(new_blend_spath, blend_scaled)
-			blend_orig	= overlay(batch_img, mask)
+			tfm2img		= T.ToPILImage()
+			blend_orig	= overlay(tfm2img(batch_img), mask)
 			cv2.imwrite(new_blend_opath, blend_orig)
 
 	# Write all entries for this batch
