@@ -6,9 +6,22 @@
 
 # ./fast.ai-inference-ResNet-segmentation.py --model_path /mnt/raid1/repos/pothole-detection/models/pothole-segmentron-UNet-resnet101-basic-data-aug-img_size-540-540-1a-2025-05-22_18.35.22-WD-0.0001-BS-6-LR-0.0001-0.001-epoch-0-valid_loss-22.9389.pth --input_dir /tmp/potholes-train --output_dir /mnt/raid1/repos/pothole-detection/inference/bing-images-download/dataset/cracked-statue-inference --encoder ResNet-101 --batch_size 2 --device cuda:0 --num_classes 5 --img_size 540
 
+# ./fast.ai-inference-ResNet-segmentation.py --model_path /tmp/pot/models/surface-damage-segmentation-CH-UNet-resnet101-basic-data-aug-img_size-540-540-1a-2025-06-10_18.47.17-WD-0.0001-BS-8-LR-0.0001-0.001-epoch-2-dice_multi-0.8079.pth --input_dir /tmp/pot/inference/bing-images-download/dataset/cracked\ statue --output_dir /tmp/pot/inference/bing-images-download/dataset/cracked-statue-inference --encoder ResNet-101 --batch_size 1 --device cuda:0 --num_classes 2 --img_size 540
+
+# ./fast.ai-inference-ResNet-segmentation.py --model_path /tmp/pot/models/surface-damage-segmentation-CH-UNet-resnet101-basic-data-aug-img_size-540-540-1a-2025-06-10_18.47.17-WD-0.0001-BS-8-LR-0.0001-0.001-epoch-2-dice_multi-0.8079.pth --input_dir /tmp/pot/inference/bing-images-download/dataset/cracked\ marble\ temples\ column  --output_dir /tmp/pot/inference/bing-images-download/dataset/cracked-marble-temples-column-inference --encoder ResNet-101 --batch_size 2 --device cuda:0 --num_classes 2 --img_size 540
+
+# ./fast.ai-inference-ResNet-segmentation.py --model_path /tmp/pot/models/surface-damage-segmentation-CH-UNet-resnet101-basic-data-aug-img_size-540-540-1a-2025-06-10_18.47.17-WD-0.0001-BS-8-LR-0.0001-0.001-epoch-2-dice_multi-0.8079.pth --input_dir /tmp/pot/inference/bing-images-download/dataset/marble\ statue\ with\ cracks --output_dir /tmp/pot/inference/bing-images-download/dataset/marble-statue-with-cracks-inference --encoder ResNet-101 --batch_size 1 --device cuda:0 --num_classes 2 --img_size 540
+
 # Run classification inference with:
 
 # ./fast.ai-inference.py --input_dir /mnt/raid1/dataset/shrec-2025-protein-classification/v2-20250331/test-orig-renamed-labeled-screenshots/unk --output_dir /mnt/raid1/dataset/shrec-2025-protein-classification/v2-20250331/inference-test-set-labeled-screenshots --model_path /mnt/raid1/repos/shrec2025/Protein_Classification/notebooks/models/shrec-2025-protein-classification-resnet50--no-data-aug-img_size-320-320-1a-2025-04-04_12.15.05-BS-64-LR-0.0005-0.001-epoch-8-valid_loss-0.2962.pth --batch_size 64 --img_size 320 --device cuda:0 &> fast.ai-inference-on-test-set-`currdate`.txt
+
+
+# Quick sort & archive predicted images with:
+
+# hour=1954 ; mkdir -p $hour/masks $hour/blend ; mv *mask* $hour/masks ; mv *blend* $hour/blend
+
+
 
 # test img: S8_jpg.rf.793e49c2ae65e25bd2d7a14bb534e5c5.jpg
 

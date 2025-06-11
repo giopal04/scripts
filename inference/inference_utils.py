@@ -11,6 +11,10 @@ import cv2
 
 from format import Text
 
+def item_transform(img_size):
+	# This is a transform, there's no image!
+	return Resize(img_size, method=ResizeMethod.Pad, pad_mode=PadMode.Zeros)
+
 def change_mask_color(img, from_c, to_c, debug=False):
 	if len(img.shape) < 3 or img.shape[2] == 1:
 		img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
@@ -86,7 +90,7 @@ def load_model(input_dir, model_path, device, encoder, img_size, bs, num_classes
 	dblock = DataBlock(blocks=(ImageBlock, CategoryBlock),
 					   get_items=get_image_files,
 					   get_y=parent_label,
-					   item_tfms=Resize(img_size,method=ResizeMethod.Pad,pad_mode=PadMode.Zeros),
+					   item_tfms=item_transform(img_size),
 					   batch_tfms=Normalize.from_stats(*imagenet_stats))
 
 	metrics = [
@@ -168,6 +172,28 @@ def write_batch_log(log_entries, output_dir):
 		for entry in log_entries:
 			f.write(f"{entry}\n")
 
+
+def resize_mask_and_blend_with_orig_img(orig_img, mask, img_size=540):
+	#orig_img = np.array(Image.open(file_path))
+	orig_h, orig_w	= orig_img.shape[:2]
+	
+	# Compute padding parameters
+	ratio		= min(img_size / orig_h, img_size / orig_w)
+	new_h, new_w	= int(orig_h * ratio), int(orig_w * ratio)
+	pad_top		= (img_size - new_h) // 2
+	pad_left	= (img_size - new_w) // 2
+
+	# Process mask: crop padding -> resize to original
+	#mask		= clss[i].cpu().numpy()
+	cropped_mask	= mask[pad_top:pad_top+new_h, pad_left:pad_left+new_w]
+	resized_mask	= cv2.resize(cropped_mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+	
+	# Overlay mask on original image
+	blend		= overlay(orig_img, resized_mask, alpha=0.5)
+	#save_path	= output_dir / Path(file_path).name
+	#cv2.imwrite(str(save_path), blend[..., ::-1])			# RGB to BGR for OpenCV
+	return blend, resized_mask
+
 def process_batch(batch, model, files, output_dir, device, args, debug=False):
 	with torch.no_grad():
 		print(f'{Text(batch, "batch"):inspect}')
@@ -186,8 +212,14 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			print(f'{Text(clss,  "clss"):content}')
 			print(f'{clss[clss != 0].shape = }')
 
+	# Unnormalize batch images (if needed for visualization)
+	norm = Normalize.from_stats(*imagenet_stats)
+	batch_imgs = norm.decode(batch).permute(0, 2, 3, 1).cpu().numpy()  # [batch, H, W, 3]
+	#show_image(norm_apply_denorm(timg, f, nrm)[0]);
+
 	log_entries = []
-	for file_path, cls, conf, batch_itm in zip(files, clss.cpu(), confs.cpu(), batch.cpu()):
+	#for file_path, cls, conf, batch_itm in zip(files, clss.cpu(), confs.cpu(), batch.cpu()):
+	for file_path, cls, conf, batch_itm in zip(files, clss.cpu(), confs.cpu(), batch_imgs):
 		src_path = Path(file_path)
 		file_id  = src_path.stem
 		fid = file_id.split('-')[0]			# e.g. obj 1040
@@ -217,15 +249,21 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			new_blend_opath	= output_dir / f"{new_blend_stem}-orig{file_path.suffix}"
 			new_mask_path	= output_dir / f"{new_mask_stem}.png"
 			mask		= cls.cpu().numpy().astype(np.uint8)
-			cv2.imwrite(new_mask_path, mask)
-			img		= cv2.imread(file_path)
-			#blend		= overlay(img, mask)
 			mask		= change_mask_color(mask, (1, 1, 1), (  0,   0, 255))		# TODO: hardcoded! write an argparse entry for this!
 			mask		= change_mask_color(mask, (2, 2, 2), (  0, 255,   0))		# TODO: hardcoded! write an argparse entry for this!
 			mask		= change_mask_color(mask, (3, 3, 3), (255,   0,   0))		# TODO: hardcoded! write an argparse entry for this!
 			mask		= change_mask_color(mask, (4, 4, 4), (  0, 255, 255))		# TODO: hardcoded! write an argparse entry for this!
-			blend		= overlay(img, mask)
+			cv2.imwrite(new_mask_path, mask)
+			img		= cv2.imread(file_path)
+			blend, rsz_mask = resize_mask_and_blend_with_orig_img(img, mask, img_size=args.img_size)
 			cv2.imwrite(new_blend_path, blend)
+			itm_tfm		= item_transform(args.img_size)
+			img		= itm_tfm(Image.fromarray(img))					# Fast.ai Resize() works only on PIL Images...
+			img		= np.array(img)
+			#cv2.imwrite(f'/tmp/asdf-{new_blend_stem}.jpg', img)
+			#blend		= overlay(img, mask)
+			#blend		= overlay(img, mask)
+			#cv2.imwrite(new_blend_path, blend)
 			print(f'{Text(batch_itm, "batch_itm"):content}')
 			#batch_img	= np.asarray(to_image(batch_itm))
 			#batch_img	= np.asarray(to_image(batch_itm))
@@ -234,10 +272,16 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			blend_scaled	= overlay(scaled_img, mask)
 			cv2.imwrite(new_blend_spath, blend_scaled)
 			tfm2img		= T.ToPILImage()
-			batch_img	= np.asarray(tfm2img(batch_itm).convert('RGB'))
+			#batch_img	= np.asarray(tfm2img(batch_itm).convert('RGB'))
+
+			# Inside the batch loop (use instead of original image blending)
+			batch_img	= (batch_itm * 255).astype(np.uint8)
+			blend_padded	= overlay(batch_img[..., ::-1], mask)
+			cv2.imwrite(new_blend_opath, blend_padded)
+
 			print(f'{Text(batch_img, "batch_img"):content}')
-			blend_orig	= overlay(batch_img, mask)
-			cv2.imwrite(new_blend_opath, blend_orig)
+			#blend_orig	= overlay(batch_img, mask)
+			#cv2.imwrite(new_blend_opath, blend_orig)
 
 	# Write all entries for this batch
 	write_batch_log(log_entries, output_dir)
