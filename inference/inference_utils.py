@@ -86,7 +86,7 @@ def load_model(input_dir, model_path, device, encoder, img_size, bs, num_classes
 	dblock = DataBlock(blocks=(ImageBlock, CategoryBlock),
 					   get_items=get_image_files,
 					   get_y=parent_label,
-					   item_tfms=Resize(img_size),
+					   item_tfms=Resize(img_size,method=ResizeMethod.Pad,pad_mode=PadMode.Zeros),
 					   batch_tfms=Normalize.from_stats(*imagenet_stats))
 
 	metrics = [

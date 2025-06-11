@@ -43,7 +43,7 @@ class Text:
         
         elif isinstance(self.text, numpy.ndarray):
             to_print = (f'{self.name} type = {type(self.text)}\n',
-                        f'{self.name} device = {self.text.device}\n',
+                        #f'{self.name} device = {self.text.device}\n',		# we don't have any device (ever) for numpy arrays, right?
                         f'{self.name} dtype = {self.text.dtype}\n',
                         f'{self.name} shape = {self.text.shape}')
 
