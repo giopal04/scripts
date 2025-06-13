@@ -104,21 +104,16 @@ def load_model(input_dir, model_path, device, encoder, img_size, bs, num_classes
 	#dls = dblock.dataloaders(input_dir, bs=4, num_classes=97)
 	dls = dblock.dataloaders(input_dir, bs=bs, num_classes=num_classes)
 
-	if 'ResNet' in encoder:
+	if 'resnet' in encoder.lower() or 'convnext' in encoder.lower() or 'efficientnet' in encoder.lower():
 		arch_func = find_backbone(encoder.lower().replace('-', ''))
+
+		if arch_func is None:
+			print(f'Unable to find {encoder} within Fast.ai standard models, retrying with Timm...')
+			# we're forced to use len(env['codes']) because there's no dls.c inside a segmentation DataLoader
+			arch_func = partial(timm.create_model, model_name=encoder, pretrained=True, num_classes=num_classes)
+
 		print(f'Allocating a ResNet Learner. Type: {encoder} - {arch_func = }')
 		learn     = unet_learner(dls=dls, arch=arch_func, loss_func=CrossEntropyLossFlat(axis=1), metrics=metrics, self_attention=True, n_out=num_classes) #.to_fp16()
-		'''
-		if '101' in encoder:
-			enc_object = resnet101
-		elif '50' in encoder:
-			enc_object = resnet50
-		else:
-			print(f'Unknown encoder: {encoder}')
-			enc_object = None
-			return
-		learn = vision_learner(dls, enc_object, pretrained=False, n_out=5, loss_func=CrossEntropyLossFlat(), metrics=metrics, cbs=[MixedPrecision]).to_fp16()
-		'''
 	elif 'ViT' in encoder or 'vit' in encoder:
 		# Create learner and load weights
 		#learn = vision_learner(dls, resnet50, pretrained=False, n_out=97)
