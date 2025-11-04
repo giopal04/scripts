@@ -18,6 +18,7 @@ DINOv3_MODELS = {
     'vit-base': 'facebook/dinov3-vitb16-pretrain-lvd1689m',
     'vit-large': 'facebook/dinov3-vitl16-pretrain-lvd1689m',
     'vit-huge-plus': 'facebook/dinov3-vith16plus-pretrain-lvd1689m',
+    'vit-7b': 'facebook/dinov3-vit7b16-pretrain-lvd1689m'
 }
 PATCH_SIZE = 16
 
