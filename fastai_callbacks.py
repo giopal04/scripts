@@ -1,51 +1,14 @@
-#%%
-from fastai.vision.all import * #type: ignore
+"""
+File containg some fastai callbacks implemented
 
-device = torch.device('cuda:0')
-#%%
+1. CutMixSegmentation
+    Implements cut mix for segmentation
+2. ShowLossesMetricsCallback
+    Shows metrics and losses chart at the end of training
 
-path = Path('/home/giorgio/.fastai/data/camvid')
+"""
 
-valid_images = np.loadtxt(path/'valid.txt', dtype=str)
-codes = list(np.loadtxt(path/'codes.txt', dtype=str))
-
-def get_mask(x): return path/'labels'/f'{x.stem}_P.png'
-
-def func_splitter(x): return True if f'{x.stem}.png' in valid_images else False
-
-images = get_image_files(path/'images')
-msk = PILMask.create(get_mask(images[0]))
-sz = msk.shape #type: ignore
-eighth = tuple(int(x/8) for x in sz)
-#%%
-def image_loader(path, classes, size, bs, test=False):
-    
-    camvid = DataBlock(
-        blocks = (ImageBlock, MaskBlock(classes)),
-        get_items = get_image_files,
-        splitter = FuncSplitter(func_splitter),
-        get_y = get_mask,
-        batch_tfms = [Normalize.from_stats(*imagenet_stats)]
-    )
-    
-    if test:
-        camvid.summary(path)
-    
-    loaded_data = camvid.dataloaders(path, bs=bs)
-    loaded_data.vocab = classes 
-    
-    return loaded_data
-
-#
-#%%
-class TestCallback(Callback):    
-    def after_epoch(self):
-        print('Finished')
-#%%
-dls = image_loader(path/'images', codes, eighth, 4)
-#learn = unet_learner(dls, resnet18, cbs=TestCallback())
-#learn.fit(2, 1e-3)
-# %%
+from fastai.vision.all import *
 import random as rnd
 
 def PIL2tensor(x, is_img=True):
@@ -93,19 +56,14 @@ def cutmix_function(imgs, bb, patch_idxs):
             patch = img[yl[i]:yh[i],xl[i]:xh[i]]
             patch_list.append(patch)
     
-    #patched_imgs = []
     for i, idx in enumerate(patch_idxs):
-        #print(f'{i = }\t{idx = }')
         img = imgs[i]
         
         if img.shape[0] == 3:
             img[:,yl[i]:yh[i],xl[i]:xh[i]] = patch_list[idx]        
-            #patched_imgs.append(img.clone())
         else:
             img[yl[i]:yh[i],xl[i]:xh[i]] = patch_list[idx]        
-            #patched_imgs.append(img.clone())
         
-
 def cutmix_segmentation(batch, lam=None):
     
     imgs, msks = batch
@@ -127,7 +85,6 @@ def show_cutmix(dls):
     new_batch = cutmix_segmentation(batch)
     dls.show_batch(new_batch)
 
-# %%
 class CutMixSegmentation(Callback):
     run_after,run_valid = [Normalize],False
     
@@ -139,7 +96,42 @@ class CutMixSegmentation(Callback):
         cutmix_segmentation(cutmix_batch, lam=self.lam)
         
         return
-# %%
-learn = unet_learner(dls, resnet18, cbs=CutMixSegmentation())
-learn.fit(1, 1e-3)
-# %%
+
+class ShowLossesMetricsCallback(Callback):
+    order,run_valid=65,False
+
+    def before_fit(self):
+        self.run = not hasattr(self.learn, 'lr_finder') and not hasattr(self, "gather_preds")
+        if not(self.run): return
+        self.nb_batches = []
+        assert hasattr(self.learn, 'progress')
+
+        self.metrics_names = [m.name for m in self.learn.metrics]
+        self.fig, self.axs = plt.subplots(1,2, figsize=(12,4))
+        
+        self.val_losses, self.metrics = [], []
+
+    def after_train(self): self.nb_batches.append(self.train_iter)
+    
+    def update_graphs(self):
+
+        self.axs[0].clear()
+        self.axs[0].set_title("Losses")
+        self.axs[0].plot(range_of(self.learn.recorder.losses), self.learn.recorder.losses, label='train')
+        self.axs[0].plot(self.nb_batches, self.val_losses, label='valid')
+        self.axs[0].legend()
+
+        self.axs[1].clear()
+        self.axs[1].set_title("Metrics")
+        for name, metric in zip(self.metrics_names, self.metrics):
+            self.axs[1].plot(self.nb_batches, metric, label=name)
+        self.axs[1].legend()
+
+        self.fig.canvas.draw()
+        #display(self.fig)
+
+    def after_fit(self):
+        rec = self.learn.recorder
+        self.val_losses = [v[1] for v in rec.values]
+        self.metrics = np.array([v[2:] for v in rec.values]).T
+        self.update_graphs()
