@@ -102,6 +102,7 @@ def load_model(input_dir, model_path, device, encoder, img_size, bs, num_classes
               ]    
 	# Dummy dataloaders with 97 classes (matching your model output)
 	#dls = dblock.dataloaders(input_dir, bs=4, num_classes=97)
+	print(f'Creating dummy dataloaders with {num_classes} classes from directory: {Path(input_dir).name}')
 	dls = dblock.dataloaders(input_dir, bs=bs, num_classes=num_classes)
 
 	if 'resnet' in encoder.lower() or 'convnext' in encoder.lower() or 'efficientnet' in encoder.lower():
@@ -259,7 +260,8 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			#blend		= overlay(img, mask)
 			#blend		= overlay(img, mask)
 			#cv2.imwrite(new_blend_path, blend)
-			print(f'{Text(batch_itm, "batch_itm"):content}')
+			if debug:
+				print(f'{Text(batch_itm, "batch_itm"):content}')
 			#batch_img	= np.asarray(to_image(batch_itm))
 			#batch_img	= np.asarray(to_image(batch_itm))
 			#print(f'{Text(batch_img, "batch_img"):inspect}')
@@ -274,7 +276,8 @@ def process_batch(batch, model, files, output_dir, device, args, debug=False):
 			blend_padded	= overlay(batch_img[..., ::-1], mask)
 			cv2.imwrite(new_blend_opath, blend_padded)
 
-			print(f'{Text(batch_img, "batch_img"):content}')
+			if debug:
+				print(f'{Text(batch_img, "batch_img"):content}')
 			#blend_orig	= overlay(batch_img, mask)
 			#cv2.imwrite(new_blend_opath, blend_orig)
 

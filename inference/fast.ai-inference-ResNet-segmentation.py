@@ -66,6 +66,7 @@ def main():
     learn.model.eval()
     
     # Create inference dataloader
+    print(f'Creating inference dataloader from directory: {input_dir.name}')
     files = get_image_files(input_dir)
     dl    = learn.dls.test_dl(files, bs=args.batch_size, num_workers=48)
     
