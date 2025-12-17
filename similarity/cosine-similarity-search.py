@@ -114,7 +114,10 @@ def main():
 	data = load_embeddings(embeddings_path)
 	print(f'Loaded {len(data["filenames"])} embeddings')
 	print(f'Embedings contains the following keys		: {data.keys()}')
-	print(f'Embedings contains the following filenames	: {data["filenames"]}')
+	if len(data['filenames']) <= 100:
+		print(f'Embedings contains the following filenames	: {[Path(fn).name for fn in data["filenames"]]}')
+	else:
+		print(f'Embedings contains the following filenames	: {[Path(fn).name for fn in data["filenames"][:5]]} ... {[Path(fn).name for fn in data["filenames"][-5:]]}')
 	print(f'Embedings contains the following metadata	: {data["metadata"]}')
 	
 	# Find similar images
@@ -125,27 +128,28 @@ def main():
 		return
 	
 	# Display results
-	print(f'\nTop {len(results)} similar images to {args.query}:')
+	qfn   = args.query
+	qfnn  = Path(args.query).name
+	image = cv2.imread(qfn)
+	print(f'\nTop {len(results)} similar images to\n{args.query} ({image.shape[0]}x{image.shape[1]}):')
 	print('-' * 60)
 
 	if args.show_images:
-		qfn   = args.query
-		qfnn  = Path(args.query).name
-		image = cv2.imread(qfn)
 		cv2.namedWindow	(qfnn, cv2.WINDOW_NORMAL)
 		cv2.moveWindow	(qfnn, 0, 320)
 		cv2.resizeWindow(qfnn, 320, 320)
 		cv2.imshow	(qfnn, image)
 
 	for idx, result in enumerate(results):
-		print(f'{result["rank"]}. {Path(result["filename"]).name}')
+		fn    = result["filename"]
+		fnn   = Path(result["filename"]).name
+		image = cv2.imread(fn)
+		print(f'{result["rank"]}. Filename  : {Path(result["filename"]).name}')
+		print(f'   Size      : {image.shape[0]}x{image.shape[1]}')
 		print(f'   Similarity: {result["similarity"]:.4f}')
-		print(f'   Path: {result["filename"]}')
+		print(f'   Path      : {result["filename"]}')
 		print()
 		if args.show_images:
-			fn    = result["filename"]
-			fnn   = Path(result["filename"]).name
-			image = cv2.imread(fn)
 			cv2.namedWindow	(fnn, cv2.WINDOW_NORMAL)
 			cv2.moveWindow	(fnn, 0+320*(idx+1), 320)
 			cv2.resizeWindow(fnn, 320, 320)
