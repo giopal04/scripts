@@ -45,16 +45,19 @@ except ImportError:
 
 
 # Map model names to HuggingFace model IDs
+# Sizes can be found here: https://github.com/facebookresearch/dinov3?tab=readme-ov-file#pretrained-models
+# Benchmark table can be found here: https://arxiv.org/html/2508.10104v1#S7.T14
 model_map = {
-	'dinov2-small':	'facebook/dinov2-small',
-	'dinov2-base':	'facebook/dinov2-base',
-	'dinov2-large':	'facebook/dinov2-large',
+	'dinov2-small'		:	'facebook/dinov2-small',
+	'dinov2-base'		:	'facebook/dinov2-base',
+	'dinov2-large'		:	'facebook/dinov2-large',
 
-	'dinov3-small':	'facebook/dinov3-vits16-pretrain-lvd1689m',
-	'dinov3-large':	'facebook/dinov3-vitb16-pretrain-lvd1689m',
-	'dinov3-huge':	'facebook/dinov3-vitl16-pretrain-lvd1689m',
-	'dinov3-7b':	'facebook/dinov3-vit7b16-pretrain-lvd1689m',
-	'dinov3-16':	'facebook/dinov3-vith16plus-pretrain-lvd1689m',
+	'dinov3-small'		:	'facebook/dinov3-vits16-pretrain-lvd1689m',		# 21m
+	'dinov3-small+'		:	'facebook/dinov3-vits16plus-pretrain-lvd1689m',		# 29m
+	'dinov3-big'		:	'facebook/dinov3-vitb16-pretrain-lvd1689m',		# 86m
+	'dinov3-large'		:	'facebook/dinov3-vitl16-pretrain-lvd1689m',		# 300m
+	'dinov3-huge16+'	:	'facebook/dinov3-vith16plus-pretrain-lvd1689m',		# 840m
+	'dinov3-7b'		:	'facebook/dinov3-vit7b16-pretrain-lvd1689m',		# this one is the original one from which all the others have been distilled
 	}
 ext_list = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
 
@@ -265,8 +268,10 @@ def main():
 	# Find all image files
 	image_paths = []
 	for ext in args.extensions:
-		image_paths.extend(image_dir.glob(f'*{ext}'))
-		image_paths.extend(image_dir.glob(f'*{ext.upper()}'))
+		image_paths.extend(image_dir.rglob(f'*{ext}'))
+		image_paths.extend(image_dir.rglob(f'*{ext.upper()}'))
+		#image_paths.extend(image_dir.glob(f'*{ext}'))
+		#image_paths.extend(image_dir.glob(f'*{ext.upper()}'))
 	
 	if not image_paths:
 		print(f'No images found in {image_dir} with extensions {args.extensions}')
