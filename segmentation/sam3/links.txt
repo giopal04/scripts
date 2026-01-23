@@ -1,0 +1,7 @@
+SAM3 fine-tuning: https://github.com/facebookresearch/sam3/issues/163
+SAM3 feature visualization via PCA: https://github.com/facebookresearch/sam3/issues/230
+SAM3 TensorRT C++ inference: https://github.com/leon0514/trt-sam3
+SAM3 ONNX models and TensorRT conversion scripts: https://github.com/facebookresearch/sam3/issues/224
+SAM3 complex text label tasks: https://github.com/facebookresearch/sam3/issues/190
+CUDA OutOfMemoryError using SAM3 video predictor (build_sam3_video_predictor): https://github.com/facebookresearch/sam3/issues/169
+Efficient SAM3: https://simonzeng7108.github.io/efficientsam3/
