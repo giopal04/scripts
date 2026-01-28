@@ -1,13 +1,13 @@
 import torch
+import numpy as np
 from PIL import Image
-from torchvision import transforms as T
+from torchvision.transforms.v2 import ToPILImage
 
 def PIL2Tensor(image: Image) -> torch.Tensor:
-    to_tensor = T.ToTensor()
 
-    return to_tensor(image)
+    return torch.tensor(np.array(image))
 
 def Tensor2PIL(tensor: torch.Tensor) -> Image:
-    to_image = T.ToPILImage()
+    to_image = ToPILImage()
 
     return to_image(tensor)
