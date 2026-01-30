@@ -57,18 +57,21 @@ class Text:
         return message + '\n'
 
     def max_min(self, show_details: bool = True) -> str:
-        if isinstance(self.text, torch.Tensor) and not self.text.dtype == torch.bool:
+        if isinstance(self.text, torch.Tensor):
+            if self.text.dtype == torch.bool:
+                return f'Maximum ans minimum are not meaningfull for a {type(self.text)} of type {self.text.dtype}'
+            
             _max = torch.max(self.text)
             _min = torch.min(self.text)
             _mean = torch.mean(self.text.float())
         
-        elif isinstance(self.text, numpy.ndarray) and not self.text.dtype == 'bool':
+        elif isinstance(self.text, numpy.ndarray):
+            if self.text.dtype == 'bool':
+                return f'Maximum ans minimum are not meaningfull for a {type(self.text)} of type {self.text.dtype}'
+            
             _max = numpy.max(self.text)
             _min = numpy.min(self.text)
             _mean = numpy.mean(self.text)
-        
-        elif self.text.dtype == 'bool' or self.text.dtype == torch.bool:
-            return f'Maximum ans minimum are not meaningfull for a {type(self.text)} of type {self.text.dtype}'
 
         else:
             return f'Maximum and minimum are not available for {type(self.text)}'
