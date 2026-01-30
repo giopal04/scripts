@@ -90,6 +90,11 @@ class Text:
         else:
             return f'{self.name} max = {_max},\tmin = {_min},\tmean = {_mean}'
 
+def inspect(var, name='test'): print(f'{Text(var, name):inspect}')
+
+def content(var, name='test'): print(f'{Text(var, name):content}')
+
+def maxmin(var, name='test'): print(f'{Text(var, name):maxmin}')
 
 if __name__ == '__main__':
     tt = torch.rand([2,3,4])
