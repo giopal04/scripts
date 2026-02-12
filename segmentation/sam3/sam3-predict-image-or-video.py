@@ -34,8 +34,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model_path",	type=str, default="/mnt/raid1/repos/sam3/models/sam3.pt",	help="Model checkpoint to load")
 parser.add_argument("--image",		type=str, default="",						help="Image to segment")
 parser.add_argument("--video",		type=str, default="",						help="Video to segment")
-parser.add_argument("--text",		type=str, default="person",					help="Video to segment")
+parser.add_argument("--text",		type=str, default="person",					help="Text prompt")
 parser.add_argument("--output-dir",	type=str, default="/tmp",					help="Output directory")
+parser.add_argument("--device",		type=int, default=1,						help="GPU to use")
 parser.add_argument("--debug",		type=int, default=0,						help="Debug mode")
 args = parser.parse_args()
 
@@ -240,7 +241,7 @@ elif args.video != "":
 		# ValueError: Default process group has not been initialized, please make sure to call init_process_group.
 		gpus_to_use     = range(torch.cuda.device_count())
 	else:
-		gpus_to_use     = [1]
+		gpus_to_use     = [args.device] if isinstance(args.device, int) else args.device
 	print(f"Using GPUs   : {gpus_to_use}")
 	video_predictor = build_sam3_video_predictor(checkpoint_path=args.model_path, gpus_to_use=gpus_to_use)
 	'''
