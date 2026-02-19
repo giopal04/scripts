@@ -37,7 +37,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model-path",	type=str, default="/mnt/raid1/repos/sam3/models/sam3.pt",	help="Model checkpoint to load")
 parser.add_argument("--image-dir",	type=str, default="",						help="Director of images to segment")
 parser.add_argument("--video",		type=str, default="",						help="Video to segment")
-parser.add_argument('--prompts', 	type=str, default=["person"],	nargs='+',	help='Promts for the model')# ,
+parser.add_argument('--prompts', 	type=str, default="statue",	help='Promts for the model. Give them as "prompt1 prompt2 prompt3"')# ,
 parser.add_argument("--output-dir",	type=str, default="/tmp",					help="Output directory")
 parser.add_argument("--single-instances", action="store_true", help="For each image and each class, saves a mask containing all instances of a single class")
 parser.add_argument("--save-blended", action="store_true", help="Save the instance segmentation mask blended with the image")
@@ -313,11 +313,12 @@ if args.image_dir != "":
 		if not blend_folder.exists():
 			blend_folder.mkdir()
 
-	save_file = out_dir/'test_save.json'
+	save_file = out_dir/'sam3_inference.json'
 
 	# Preapering prompt
-	args.prompts.sort()
-	prompt2id = {p: i+1 for i, p in enumerate(args.prompts)}
+	prompts = args.prompts.split(' ')
+	prompts.sort()
+	prompt2id = {p: i+1 for i, p in enumerate(prompts)}
 	id2colors = get_color_scheme(len(prompt2id))
 
 	data = {
@@ -328,7 +329,8 @@ if args.image_dir != "":
 	data['metadata']['prompt2id'] = prompt2id
 	data['metadata']['id2colors'] = id2colors
 
-	for i, path in tqdm(enumerate(images_paths)):
+	print('Starting inference on images...')
+	for i, path in enumerate(tqdm(images_paths)):
 		#print(f'{i+1}/{len(images_paths)}. Processing image {path.name}')
 		data['images'][path.name] = []
 
@@ -343,7 +345,7 @@ if args.image_dir != "":
 			encoded_mask, m_shape, m_dtype = encode_mask(inst['mask'])
 			instance_data = {
 				'prompt': inst['prompt'],
-				'class_id': inst['class_id'],
+				#'class_id': inst['class_id'],
 				'mask': encoded_mask,
 				'shape': list(m_shape),
 				'dtype': str(m_dtype),
@@ -353,6 +355,7 @@ if args.image_dir != "":
 			data['images'][path.name].append(instance_data)
 
 		#Saving all
+		
 		if args.no_semantic:
 			rgb_segmentation.save(seg_folder/f'{path.stem}-rgb.png')
 			gray_segmentation.save(seg_folder/f'{path.stem}-gray.png')
@@ -369,7 +372,7 @@ if args.image_dir != "":
 		
 
 
-	save_file = out_dir/'test_save.json'
+	save_file = out_dir/'sam3_inference.json'
 	with open(save_file, 'w', encoding='utf-8') as f:
 		json.dump(data, f, ensure_ascii=False, indent=4)
 
