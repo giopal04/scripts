@@ -31,6 +31,8 @@ import base64
 
 import colorsys
 
+from tqdm import tqdm
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--model-path",	type=str, default="/mnt/raid1/repos/sam3/models/sam3.pt",	help="Model checkpoint to load")
 parser.add_argument("--image-dir",	type=str, default="",						help="Director of images to segment")
@@ -326,8 +328,8 @@ if args.image_dir != "":
 	data['metadata']['prompt2id'] = prompt2id
 	data['metadata']['id2colors'] = id2colors
 
-	for i, path in enumerate(images_paths):
-		print(f'{i+1}/{len(images_paths)}. Processing image {path.name}')
+	for i, path in tqdm(enumerate(images_paths)):
+		#print(f'{i+1}/{len(images_paths)}. Processing image {path.name}')
 		data['images'][path.name] = []
 
 		image = Image.open(path).convert('RGB')
@@ -345,7 +347,7 @@ if args.image_dir != "":
 				'mask': encoded_mask,
 				'shape': list(m_shape),
 				'dtype': str(m_dtype),
-				'bbox': [float(x) for x in inst['boxes']],
+				'bbox': [int(x) for x in inst['boxes']],
 				'score': float(inst['score'])
 			}
 			data['images'][path.name].append(instance_data)
