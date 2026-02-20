@@ -30,7 +30,7 @@ import zlib
 import base64
 
 import colorsys
-
+from pprint import pprint
 from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
@@ -316,10 +316,14 @@ if args.image_dir != "":
 	save_file = out_dir/'sam3_inference.json'
 
 	# Preapering prompt
-	prompts = args.prompts.split(' ')
+	prompts = [p.replace('-', ' OR ') for p in args.prompts.split(' ')]
 	prompts.sort()
 	prompt2id = {p: i+1 for i, p in enumerate(prompts)}
 	id2colors = get_color_scheme(len(prompt2id))
+	
+	if args.debug:
+		print('Using the following prompts:')
+		pprint(prompt2id)
 
 	data = {
 		'metadata': {},
@@ -343,8 +347,13 @@ if args.image_dir != "":
 
 		for inst in all_instances:
 			encoded_mask, m_shape, m_dtype = encode_mask(inst['mask'])
+			if 'OR' in inst['prompt']:
+				instance_prompt = 'monument'
+			else:
+				instance_prompt = inst['prompt']
+			
 			instance_data = {
-				'prompt': inst['prompt'],
+				'prompt': instance_prompt,
 				#'class_id': inst['class_id'],
 				'mask': encoded_mask,
 				'shape': list(m_shape),
