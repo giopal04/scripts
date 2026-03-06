@@ -22,7 +22,15 @@ from sam3.agent.viz import visualize
 import matplotlib
 import matplotlib.pyplot as plt
 
-from scripts.classes.maximally_distinct_colormap import hex_to_rgb_tuple, maximally_distinct_colormap
+## Add ComfyUI base paths to import basic modules...
+#sys.path.append(str(comfyui_base_dir))
+#if args.debug:
+#        print(f'sys.path: {sys.path}')
+#os.environ['PYTHONPATH'] = str(comfyui_base_dir)
+#if args.debug:
+#        print(f'PYTHONPATH: {os.environ["PYTHONPATH"]}')
+#
+#from scripts.classes.maximally_distinct_colormap import hex_to_rgb_tuple, maximally_distinct_colormap
 
 import json
 
@@ -34,16 +42,17 @@ from pprint import pprint
 from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model-path",	type=str, default="/mnt/raid1/repos/sam3/models/sam3.pt",	help="Model checkpoint to load")
-parser.add_argument("--image-dir",	type=str, default="",						help="Director of images to segment")
-parser.add_argument("--video",		type=str, default="",						help="Video to segment")
-parser.add_argument('--prompts', 	type=str, default="statue",	help='Promts for the model. Give them as "prompt1 prompt2 prompt3"')# ,
-parser.add_argument("--output-dir",	type=str, default="/tmp",					help="Output directory")
-parser.add_argument("--single-instances", action="store_true", help="For each image and each class, saves a mask containing all instances of a single class")
-parser.add_argument("--save-blended", action="store_true", help="Save the instance segmentation mask blended with the image")
-parser.add_argument("--no-semantic", action="store_false", help="Do not save semantic segmentation mask")
-parser.add_argument("--no-instance", action="store_false", help="Do not save instance segmentation mask")
-parser.add_argument("--debug",		action='store_true',						help="Debug mode")
+parser.add_argument("--model-path",		type=str, default="/mnt/raid1/repos/sam3/models/sam3.pt",	help="Model checkpoint to load")
+parser.add_argument("--image-dir",		type=str, default="",						help="Director of images to segment")
+parser.add_argument("--video",			type=str, default="",						help="Video to segment")
+parser.add_argument('--prompts', 		type=str, default="statue",					help='Promts for the model. Give them as "prompt1 prompt2 prompt3"')
+parser.add_argument("--output-dir",		type=str, default="/tmp",					help="Output directory")
+parser.add_argument("--single-instances",	action="store_true",						help="For each image and each class, saves a mask containing all instances of a single class")
+parser.add_argument("--save-blended",		action="store_true",						help="Save the instance segmentation mask blended with the image")
+parser.add_argument("--no-semantic",		action="store_false",						help="Do not save semantic segmentation mask")
+parser.add_argument("--no-instance",		action="store_false",						help="Do not save instance segmentation mask")
+parser.add_argument('--device', 		type=str, default="cuda:0",					help='Device to use')
+parser.add_argument("--debug",			action='store_true',						help="Debug mode")
 args = parser.parse_args()
 
 # Run with:
@@ -222,8 +231,9 @@ def overlay_img(img1, img2, mask, alpha=0.5):
 
     return Image.alpha_composite(img1, img2)
 
-def loading_processor(checkpoint_path):
-	model = build_sam3_image_model(load_from_HF=False, checkpoint_path=checkpoint_path)
+def loading_processor(checkpoint_path, device="cuda"):
+	model = build_sam3_image_model(load_from_HF=False, checkpoint_path=checkpoint_path, device=device)
+	model.to(device)
 
 	return Sam3Processor(model)
 
@@ -282,7 +292,7 @@ if args.image_dir != "":
 	#################################### For Image ####################################
 	# Load the model
 	print(f'Loading model...')
-	processor = loading_processor(args.model_path)
+	processor = loading_processor(args.model_path, args.device)
 	# Loading images
 	print(f'Retriving images...')
 	input_dir = Path(args.image_dir)
