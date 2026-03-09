@@ -291,49 +291,58 @@ def build_sam3_image_model(
 if args.image_dir != "":
 	#################################### For Image ####################################
 	# Load the model
-	print(f'Loading model...')
+	print(f'Loading model from {args.model_path}...')
 	processor = loading_processor(args.model_path, args.device)
 	# Loading images
-	print(f'Retriving images...')
 	input_dir = Path(args.image_dir)
+	print(f'Retriving images from {input_dir}...')
 	if not input_dir.is_dir():
 		raise FileNotFoundError(f'{input_dir} is not a directory')
 	images_paths = list(input_dir.iterdir())
+	print(f'Found {len(images_paths)} images')
 
 	# Preparing output dir
 	out_dir = Path(args.output_dir)
+	print(f'Writing results to {out_dir}...')
 	if not out_dir.exists():
 		out_dir.mkdir()
 
 	if args.no_semantic:
-		print('Saving semantic segmentation masks.')
+		print('Saving semantic segmentation masks')
 		seg_folder = out_dir/'segmentation'
 		if not seg_folder.exists():
 			seg_folder.mkdir()
+	else:
+		print('Not saving semantic segmentation masks')
 
 	if args.no_instance:
 		print('Saving instance segmentation masks')
 		inst_folder = out_dir/'instance'
 		if not inst_folder.exists():
 			inst_folder.mkdir()
+	else:
+		print('Not saving instance segmentation masks')
 	
 	if args.save_blended:
-		print('Saving blended image.')
+		print('Saving blended images')
 		blend_folder = out_dir/'blended'
 		if not blend_folder.exists():
 			blend_folder.mkdir()
+	else:
+		print('Not saving blended images')
 
 	save_file = out_dir/'sam3_inference.json'
+	print(f'Saving JSON results to {save_file}')
 
 	# Preapering prompt
 	prompts = [p.replace('-', ' OR ') for p in args.prompts.split(' ')]
 	prompts.sort()
 	prompt2id = {p: i+1 for i, p in enumerate(prompts)}
 	id2colors = get_color_scheme(len(prompt2id))
-	
-	if args.debug:
-		print('Using the following prompts:')
-		pprint(prompt2id)
+
+	# Always print the prompt first, it's the 20th time I've been looking for persons among columns and monuments...	
+	print('Using the following prompts:')
+	pprint(prompt2id)
 
 	data = {
 		'metadata': {},
