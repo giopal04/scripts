@@ -43,6 +43,8 @@ from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model-path",		type=str, default="/mnt/raid1/repos/sam3/models/sam3.pt",	help="Model checkpoint to load")
+# e.g. /mnt/raid1/repos/sam3/logs/statuario-10k/checkpoints/checkpoint_6.pt
+parser.add_argument("--fine-tuned-model-path",	type=str, default="",						help="Fine-tuned model checkpoint for a two-stage load (in case of missing keys)")
 parser.add_argument("--image-dir",		type=str, default="",						help="Director of images to segment")
 parser.add_argument("--video",			type=str, default="",						help="Video to segment")
 parser.add_argument('--prompts', 		type=str, default="statue",					help='Promts for the model. Give them as "prompt1 prompt2 prompt3"')
@@ -231,6 +233,44 @@ def overlay_img(img1, img2, mask, alpha=0.5):
 
     return Image.alpha_composite(img1, img2)
 
+def two_stage_load(pretrained_path, checkpoint_path, device):
+	print(f'Performing a two-stage load from {pretrained_path} and {checkpoint_path}...')
+	# 1. Load original pre-trained weights (has backbone + segmentation head)
+	pretrained_ckpt = torch.load(pretrained_path, map_location=device)
+
+	# 2. Load your fine-tuned weights (has only the trained heads)
+	finetuned_ckpt = torch.load(checkpoint_path, map_location=device)
+
+
+
+	pretrained_ckpt_stripped = {}
+	for k, v in pretrained_ckpt.items():
+		if k.startswith("detector."):
+			pretrained_ckpt_stripped[k[len("detector."):]] = v
+		else:
+			pretrained_ckpt_stripped[k] = v  # tracker.* etc. will pass through as-is
+
+	# Fine-tuned keys override pretrained (backbone stays pretrained since it was frozen)
+	merged = pretrained_ckpt_stripped
+	merged.update(finetuned_ckpt["model"])
+
+
+
+	#print(f'{pretrained_ckpt.keys() = }')
+	# 3. Merge: start from pretrained, override with fine-tuned
+	#merged = pretrained_ckpt
+	#merged.update(finetuned_ckpt["model"])	# fine-tuned keys overwrite
+
+	# 4. Load into model built with enable_segmentation=True
+	#model = build_sam3_image_model(..., enable_segmentation=True)
+	model = build_sam3_image_model(load_from_HF=False, checkpoint_path=pretrained_path, device=device)
+	missing, unexpected = model.load_state_dict(merged, strict=False)
+	model = model.to(device)
+	print("Missing keys:", missing)		# should be empty or only non-critical
+	print("Unexpected keys:", unexpected)
+
+	return Sam3Processor(model)
+
 def loading_processor(checkpoint_path, device="cuda"):
 	model = build_sam3_image_model(load_from_HF=False, checkpoint_path=checkpoint_path, device=device)
 	model.to(device)
@@ -292,7 +332,10 @@ if args.image_dir != "":
 	#################################### For Image ####################################
 	# Load the model
 	print(f'Loading model from {args.model_path}...')
-	processor = loading_processor(args.model_path, args.device)
+	if args.fine_tuned_model_path == "":
+		processor = loading_processor(args.model_path, args.device)
+	else:
+		processor = two_stage_load(args.model_path, args.fine_tuned_model_path, args.device)
 	# Loading images
 	input_dir = Path(args.image_dir)
 	print(f'Retriving images from {input_dir}...')
