@@ -48,6 +48,7 @@ except ImportError as exc:
 	# Get the absolute path of the directory 2 levels up (the repo root)
 	root_dir = Path(__file__).resolve().parent.parent
 	sys.path.append(str(root_dir))
+	from classes.ffmpeg_utils import finalize_ffmpeg, start_ffmpeg_streaming_v2, write_frame_to_ffmpeg
 
 try:
 	from PySide6 import QtCore, QtGui, QtWidgets
