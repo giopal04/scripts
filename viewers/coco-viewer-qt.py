@@ -211,7 +211,10 @@ def get_categories(instances: dict) -> dict[int, list]:
 def load_rgb_image(path: str | Path) -> np.ndarray:
 	bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
 	if bgr is None:
-		raise FileNotFoundError(f"Could not read image: {path}")
+		#raise FileNotFoundError(f"Could not read image: {path}")
+		print(f"Could not read image: {path}")
+		# create a 1008x1008 px black image
+		bgr = np.zeros((1008, 1008, 3), dtype=np.uint8)
 	return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
 
@@ -890,7 +893,7 @@ def options_from_args(args: argparse.Namespace) -> RenderOptions:
 def main() -> int:
 	args = build_parser().parse_args()
 	if not args.annotations:
-		logging.error("Please specify both --images and --annotations.")
+		logging.error("Please specify at least --annotations (also --images if they're in a different root directory than --annotations).")
 		return 2
 	if not args.images:
 		images = Path(args.annotations).parent
