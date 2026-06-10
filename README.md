@@ -7,3 +7,6 @@
 
 ## Cosine Similarity search using DINOv3 embeddings
 ![Cosine-Similarity-search-DINOv3](https://raw.githubusercontent.com/giopal04/scripts/refs/heads/main/pics/similarity/20251217-151516-cosine-similarity-test.png)
+
+## COCO Viewer Qt 
+![COCO-Viewer-Qt](https://raw.githubusercontent.com/giopal04/scripts/refs/heads/main/pics/coco-viewer-qt/coco-viewer-qt.png)
