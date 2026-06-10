@@ -11,6 +11,12 @@ OR
 
 ./coco-viewer-qt.py -a /tmp/tiny/__tiny-sam3-video-dataset-v2-phase-2-deduplicated-coco.json -i /tmp/tiny/ --output-video /tmp/out.mp4 --video-fps 25
 
+OR
+
+coco-viewer-qt.py -a . --format ade20k --default-show-classes 'statue,monument,column,pedestal,crack'
+coco-viewer-qt.py -a . --format ade20k --default-show-classes 'statue,sculpture,monument,column,pedestal,crack'
+
+
 Features
 --------
 * OpenCV-based image loading, masks, bounding boxes, labels, and saving.
@@ -19,6 +25,11 @@ Features
 * Parent-directory selector and parent-group navigation.
 * Auto-detected plain/compressed COCO annotations: .json, .json.gz, .json.bz2, .json.xz.
 * Optional headless video export via --output-video using ffmpeg_utils.py.
+* --default-show-classes: comma- or dash-separated list of category names shown by default.
+* Delete key: removes current image & annotations.
+  - ADE20K mode: moves files (image + JSON + segmentation PNG) into __deleted__/ on disk.
+  - COCO mode:  moves image file into __deleted__/ on disk; annotations stay in memory.
+    Press W to flush kept and deleted annotation files to disk.
 
 Install runtime deps, for example:
 	pip install opencv-python numpy PySide6
@@ -34,10 +45,11 @@ import json
 import logging
 import os
 import random
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Any
 
 import cv2
 import numpy as np
@@ -48,7 +60,17 @@ except ImportError as exc:
 	# Get the absolute path of the directory 2 levels up (the repo root)
 	root_dir = Path(__file__).resolve().parent.parent
 	sys.path.append(str(root_dir))
-	from classes.ffmpeg_utils import finalize_ffmpeg, start_ffmpeg_streaming_v2, write_frame_to_ffmpeg
+	try:
+		from classes.ffmpeg_utils import finalize_ffmpeg, start_ffmpeg_streaming_v2, write_frame_to_ffmpeg
+	except ImportError:
+		def start_ffmpeg_streaming_v2(*_, **__):
+			raise RuntimeError("Video export requires classes.ffmpeg_utils.py on PYTHONPATH.")
+
+		def write_frame_to_ffmpeg(*_, **__):
+			raise RuntimeError("Video export requires classes.ffmpeg_utils.py on PYTHONPATH.")
+
+		def finalize_ffmpeg(*_, **__):
+			return None
 
 try:
 	from PySide6 import QtCore, QtGui, QtWidgets
@@ -74,11 +96,33 @@ class RenderOptions:
 
 
 class Data:
-	"""COCO data access and iteration."""
+	"""COCO data access and iteration.
 
-	def __init__(self, image_dir: str | Path, annotations_file: str | Path):
+	Internally every supported input format is normalized to the small COCO-like
+	structure used by the renderer: images, annotations, categories.
+	"""
+
+	def __init__(self, image_dir: str | Path, annotations_file: str | Path, dataset_format: str = "coco"):
 		self.image_dir = Path(image_dir)
-		self.instances, images, self.categories = parse_coco(annotations_file)
+		self.dataset_format = dataset_format
+		self.annotations_file = Path(annotations_file)
+		if dataset_format == "ade20k":
+			self.instances, images, self.categories = parse_ade20k_tree(annotations_file, self.image_dir)
+		else:
+			self.instances, images, self.categories = parse_coco(annotations_file)
+
+		if self.instances is None or images is None or self.categories is None:
+			self.images			= None
+			self.annotations_by_image	= None
+			self.current_image		= None, None
+			self.categories			= None
+			return
+
+		# In COCO mode we keep a separate list of annotations moved out by the delete action.
+		# These are flushed to disk only on Key_W.
+		self.deleted_annos: list[dict] = []
+		self.deleted_image_ids: set[int] = set()
+
 		self.annotations_by_image = group_annotations_by_image(self.instances.get("annotations", []))
 		self.images = ImageList(images)
 		logging.info(
@@ -118,7 +162,191 @@ class Data:
 
 def parse_coco(annotations_file: str | Path) -> tuple[dict, list[tuple[int, str]], dict[int, list]]:
 	instances = load_annotations(annotations_file)
+	if instances is None:
+		return None, None, None
 	return instances, get_images(instances), get_categories(instances)
+
+
+def parse_ade20k_tree(annotations_path: str | Path, image_root: str | Path) -> tuple[dict, list[tuple[int, str]], dict[int, list]]:
+	"""Read ADE20K-style per-image JSON files from a file or directory tree.
+
+	Each JSON is expected to contain an ``annotation`` object with a filename and an
+	``object`` list. Object polygons are converted to COCO polygon segmentation and
+	bounding boxes so the existing viewer code can draw them unchanged.
+	"""
+	annotations_path = Path(annotations_path)
+	image_root = Path(image_root)
+	json_files = list_annotation_files(annotations_path)
+	if not json_files:
+		raise ValueError(f"No JSON annotation files found under: {annotations_path}")
+
+	images: list[dict[str, Any]] = []
+	annotations: list[dict[str, Any]] = []
+	category_name_to_id: dict[str, int] = {}
+	category_id_to_name: dict[int, str] = {}
+	image_id = 1
+	annotation_id = 1
+
+	for json_path in json_files:
+		try:
+			payload = load_annotations(json_path)
+		except Exception as exc:
+			logging.warning("Skipping unreadable JSON %s: %s", json_path, exc)
+			continue
+
+		ade = payload.get("annotation", payload)
+		if not isinstance(ade, dict) or "object" not in ade:
+			logging.debug("Skipping non-ADE JSON: %s", json_path)
+			continue
+
+		filename = str(ade.get("filename") or json_path.with_suffix(".jpg").name)
+		image_path = resolve_ade_image_path(json_path, annotations_path, image_root, ade, filename)
+		file_name = path_for_image_list(image_path, image_root)
+		height, width = ade_image_size(ade)
+		images.append({"id": image_id, "file_name": file_name, "height": height, "width": width})
+
+		objects = ade.get("object", [])
+		if isinstance(objects, dict):
+			objects = [objects]
+		for obj in objects or []:
+			if not isinstance(obj, dict):
+				continue
+			polygon = ade_polygon_to_flat_points(obj.get("polygon"))
+			if len(polygon) < 6:
+				continue
+			name = str(obj.get("name") or obj.get("raw_name") or "object").strip() or "object"
+			category_id = ade_category_id(obj, name, category_name_to_id, category_id_to_name)
+			bbox = bbox_from_polygon(polygon)
+			annotations.append({
+				"id": annotation_id,
+				"image_id": image_id,
+				"category_id": category_id,
+				"bbox": bbox,
+				"segmentation": [polygon],
+				"area": polygon_area(polygon),
+				"iscrowd": 0,
+				"ade_object": obj,
+			})
+			annotation_id += 1
+		image_id += 1
+
+	categories = [{"id": cat_id, "name": name} for cat_id, name in sorted(category_id_to_name.items())]
+	instances = {
+		"info": {"description": f"ADE20K-style per-image annotations from {annotations_path}"},
+		"images": images,
+		"annotations": annotations,
+		"categories": categories,
+	}
+	return instances, get_images(instances), get_categories(instances)
+
+
+def list_annotation_files(path: str | Path) -> list[Path]:
+	path = Path(path)
+	if path.is_file():
+		return [path]
+	patterns = ("*.json", "*.json.gz", "*.json.bz2", "*.json.xz")
+	files: list[Path] = []
+	for pattern in patterns:
+		print(f'Scanning for JSON files in {path} with pattern: {pattern}')
+		tmpfiles = path.rglob(pattern)
+		# Skip anything inside a __deleted__ directory.
+		files.extend(f for f in tmpfiles if "__deleted__" not in f.parts)
+	return sorted(set(files))
+
+
+def ade_image_size(ade: dict) -> tuple[int | None, int | None]:
+	imsize = ade.get("imsize") or []
+	if len(imsize) >= 2:
+		return int(imsize[0]), int(imsize[1])
+	return None, None
+
+
+def resolve_ade_image_path(json_path: Path, annotations_root: Path, image_root: Path, ade: dict, filename: str) -> Path:
+	candidates: list[Path] = []
+	candidates.append(json_path.with_name(filename))
+	candidates.append(image_root / filename)
+
+	folder = ade.get("folder")
+	if folder:
+		folder_path = Path(str(folder))
+		candidates.append(image_root / folder_path / filename)
+		candidates.append(folder_path / filename)
+
+	try:
+		rel_json_parent = json_path.parent.relative_to(annotations_root if annotations_root.is_dir() else annotations_root.parent)
+		candidates.append(image_root / rel_json_parent / filename)
+	except ValueError:
+		pass
+
+	for candidate in candidates:
+		if candidate.exists():
+			return candidate.resolve()
+	return candidates[0]
+
+
+def path_for_image_list(image_path: Path, image_root: Path) -> str:
+	try:
+		return str(image_path.resolve().relative_to(image_root.resolve()))
+	except Exception:
+		return str(image_path)
+
+
+def ade_polygon_to_flat_points(polygon: Any) -> list[float]:
+	if not isinstance(polygon, dict):
+		return []
+	xs = polygon.get("x") or []
+	ys = polygon.get("y") or []
+	points: list[float] = []
+	for x, y in zip(xs, ys):
+		try:
+			points.extend([float(x), float(y)])
+		except (TypeError, ValueError):
+			continue
+	return points
+
+
+def bbox_from_polygon(flat_points: list[float]) -> list[float]:
+	xs = flat_points[0::2]
+	ys = flat_points[1::2]
+	min_x, max_x = min(xs), max(xs)
+	min_y, max_y = min(ys), max(ys)
+	return [min_x, min_y, max_x - min_x, max_y - min_y]
+
+
+def polygon_area(flat_points: list[float]) -> float:
+	points = np.asarray(flat_points, dtype=np.float32).reshape(-1, 2)
+	if len(points) < 3:
+		return 0.0
+	return float(abs(cv2.contourArea(points)))
+
+
+def ade_category_id(
+	obj: dict,
+	name: str,
+	category_name_to_id: dict[str, int],
+	category_id_to_name: dict[int, str],
+) -> int:
+	name_ndx = obj.get("name_ndx")
+	try:
+		candidate = int(name_ndx)
+	except (TypeError, ValueError):
+		candidate = None
+
+	if candidate is not None and candidate not in category_id_to_name:
+		category_id_to_name[candidate] = name
+		category_name_to_id[name] = candidate
+		return candidate
+	if candidate is not None and category_id_to_name.get(candidate) == name:
+		return candidate
+	if name in category_name_to_id:
+		return category_name_to_id[name]
+
+	next_id = max(category_id_to_name.keys(), default=0) + 1
+	while next_id in category_id_to_name:
+		next_id += 1
+	category_id_to_name[next_id] = name
+	category_name_to_id[name] = next_id
+	return next_id
 
 
 def detect_annotation_compression(path: str | Path) -> str | None:
@@ -173,6 +401,9 @@ def open_annotation_text(path: str | Path):
 
 
 def load_annotations(fname: str | Path) -> dict:
+	if not Path(fname).is_file():
+		print(f'Annotations path should be a file while in COCO mode (chose ADE20K mode with --format=ade20k if you have multiple JSON files scattered through directories...)')
+		return None
 	compression = detect_annotation_compression(fname)
 	detail = "plain JSON" if compression is None else f"{compression}-compressed JSON"
 	logging.info("Parsing %s (%s)...", fname, detail)
@@ -384,9 +615,10 @@ class ImageList:
 
 
 class ImageViewer(QtWidgets.QMainWindow):
-	def __init__(self, data: Data):
+	def __init__(self, data: Data, default_show_classes: set[str] | None = None):
 		super().__init__()
 		self.data = data
+		self.default_show_classes: set[str] = default_show_classes or set()
 		self.current_image_rgb: np.ndarray | None = None
 		self.current_img_obj_categories: list[int] = []
 		self.current_img_categories: list[int] = []
@@ -394,6 +626,8 @@ class ImageViewer(QtWidgets.QMainWindow):
 		self.selected_objs: set[int] | None = None
 		self.parent_depth = 0
 		self.source_pixmap: QtGui.QPixmap | None = None
+		# Cache of image dicts for images deleted in COCO mode (for the __deleted__ output file).
+		self._deleted_images_cache: list[dict] = []
 
 		self.setWindowTitle("COCO Viewer - OpenCV + Qt")
 		self.resize(1200, 800)
@@ -513,6 +747,8 @@ class ImageViewer(QtWidgets.QMainWindow):
 			QtGui.QKeySequence(QtCore.Qt.Key_L): self.toggle_labels,
 			QtGui.QKeySequence(QtCore.Qt.Key_M): self.toggle_masks,
 			QtGui.QKeySequence(QtCore.Qt.Key_Space): self.toggle_all,
+			QtGui.QKeySequence(QtCore.Qt.Key_Delete): self.delete_current,
+			QtGui.QKeySequence(QtCore.Qt.Key_W): self.save_annotations,
 		}
 		for sequence, callback in bindings.items():
 			shortcut = QtGui.QShortcut(sequence, self)
@@ -616,10 +852,31 @@ class ImageViewer(QtWidgets.QMainWindow):
 		self.parent_label.setToolTip(str(selected_parent))
 
 	def render_options(self, local: bool = True) -> RenderOptions:
-		if self.selected_objs is None:
-			ignore: tuple[int, ...] = ()
+		# Build the ignore set fresh from the live data so this method is safe to call
+		# before self.current_img_obj_categories has been updated for the new image.
+		img_id, _ = self.data.current_image
+		objects = self.data.annotations_by_image.get(img_id, [])
+		live_obj_category_ids = [obj["category_id"] for obj in objects]
+		n_objs = len(live_obj_category_ids)
+		print(f'Found {n_objs} objects with the following IDs: {live_obj_category_ids}')
+
+		if self.selected_objs is not None:
+			ignore: tuple[int, ...] = tuple(i for i in range(n_objs) if i not in self.selected_objs)
+		elif self.default_show_classes:
+			# No explicit user selection, but a default class filter is active.
+			# Build the set of object indices whose category name is in the default set.
+			visible_objs: set[int] = set()
+			for i, category_id in enumerate(live_obj_category_ids):
+				name = self.data.categories[category_id][0]
+				#print(f'Matching found {i} - {name} with provided --default-show-classes {self.default_show_classes}')
+				logging.debug(f'Matching found {i} - {name} with provided --default-show-classes {self.default_show_classes}')
+				for class_name in self.default_show_classes:
+					if class_name in name:
+						logging.debug(f'MATCH!!! {i} - {name}')
+						visible_objs.add(i)
+			ignore = tuple(i for i in range(n_objs) if i not in visible_objs)
 		else:
-			ignore = tuple(i for i in range(len(self.current_img_obj_categories)) if i not in self.selected_objs)
+			ignore = ()
 		return RenderOptions(
 			bboxes_on=self.bboxes_on.isChecked(),
 			labels_on=self.labels_on.isChecked(),
@@ -684,13 +941,22 @@ class ImageViewer(QtWidgets.QMainWindow):
 		for category_id in self.current_img_categories:
 			name = self.data.categories[category_id][0]
 			self.category_list.addItem(f"{category_id} {name}")
-		if self.selected_cats is None:
-			self.category_list.selectAll()
-		else:
+		if self.selected_cats is not None:
 			for i in self.selected_cats:
 				item = self.category_list.item(i)
 				if item:
 					item.setSelected(True)
+		elif self.default_show_classes:
+			# Pre-select only the categories whose names match --default-show-classes.
+			# selected_cats stays None — render_options handles filtering independently.
+			for i, category_id in enumerate(self.current_img_categories):
+				name = self.data.categories[category_id][0]
+				if name in self.default_show_classes:
+					item = self.category_list.item(i)
+					if item:
+						item.setSelected(True)
+		else:
+			self.category_list.selectAll()
 		self.category_list.blockSignals(False)
 
 	def _update_object_list(self):
@@ -699,13 +965,21 @@ class ImageViewer(QtWidgets.QMainWindow):
 		for i, category_id in enumerate(self.current_img_obj_categories):
 			name = self.data.categories[category_id][0]
 			self.object_list.addItem(f"{i} {name}")
-		if self.selected_objs is None:
-			self.object_list.selectAll()
-		else:
+		if self.selected_objs is not None:
 			for i in self.selected_objs:
 				item = self.object_list.item(i)
 				if item:
 					item.setSelected(True)
+		elif self.default_show_classes:
+			# Highlight only objects whose category name is in the default set.
+			for i, category_id in enumerate(self.current_img_obj_categories):
+				name = self.data.categories[category_id][0]
+				if name in self.default_show_classes:
+					item = self.object_list.item(i)
+					if item:
+						item.setSelected(True)
+		else:
+			self.object_list.selectAll()
 		self.object_list.blockSignals(False)
 
 	def select_category(self):
@@ -814,6 +1088,172 @@ class ImageViewer(QtWidgets.QMainWindow):
 			bgr = cv2.cvtColor(self.current_image_rgb, cv2.COLOR_RGB2BGR)
 			cv2.imwrite(path, bgr)
 
+	# ------------------------------------------------------------------
+	# Delete / save helpers
+	# ------------------------------------------------------------------
+
+	def delete_current(self):
+		"""Delete the currently displayed image (and its annotations).
+
+		ADE20K mode: moves the image file and its per-image JSON into a
+		``__deleted__`` sub-directory relative to the image root.
+
+		COCO mode: moves the image file into a ``__deleted__`` sub-directory,
+		transfers its annotations from the live list into ``data.deleted_annos``
+		(in memory only), and removes the image entry from ``data.images``.
+		Nothing is written to disk until the user presses W.
+		"""
+		img_id, img_name = self.data.current_image
+		if img_name is None:
+			return
+
+		full_path = self.data.image_dir / img_name
+
+		if self.data.dataset_format == "ade20k":
+			self._delete_ade20k(img_id, img_name, full_path)
+		else:
+			self._delete_coco(img_id, img_name, full_path)
+
+	def _move_to_deleted(self, src: Path, deleted_root: Path) -> Path:
+		"""Move *src* into *deleted_root*, preserving its sub-path relative to
+		``self.data.image_dir``.  Returns the destination path."""
+		try:
+			rel = src.resolve().relative_to(self.data.image_dir.resolve())
+		except ValueError:
+			rel = Path(src.name)
+		dst = deleted_root / rel
+		dst.parent.mkdir(parents=True, exist_ok=True)
+		shutil.move(str(src), str(dst))
+		return dst
+
+	def _delete_ade20k(self, img_id: int, img_name: str, full_path: Path):
+		deleted_root = self.data.image_dir / "__deleted__"
+		deleted_root.mkdir(parents=True, exist_ok=True)
+		moved: list[str] = []
+
+		# Glob everything in the same directory whose name starts with this image's stem.
+		# This catches the image itself, companion JSONs, segmentation PNGs (_seg.png,
+		# _parts_1.png, _parts_2.png, ...), and the per-image subdirectory if present.
+		stem = full_path.stem
+		parent_dir = full_path.parent
+		candidates = sorted(parent_dir.iterdir())
+		for entry in candidates:
+			if entry.name.startswith(stem) and "__deleted__" not in entry.parts:
+				dst = self._move_to_deleted(entry, deleted_root)
+				moved.append(str(dst))
+				logging.info("  moved %s -> %s", entry, dst)
+
+		self._remove_image_from_list(img_id)
+		self.status.showMessage(
+			f"[ADE20K] Moved {len(moved)} item(s) to __deleted__: {img_name}", 5000
+		)
+		logging.info("Deleted (ADE20K) %s -> __deleted__ (%d items)", img_name, len(moved))
+		self._advance_after_delete()
+
+	def _delete_coco(self, img_id: int, img_name: str, full_path: Path):
+		deleted_root = self.data.image_dir / "__deleted__"
+
+		# Move the image file on disk.
+		if full_path.exists():
+			self._move_to_deleted(full_path, deleted_root)
+
+		# Transfer annotations from live dict to deleted list (in memory).
+		annos = self.data.annotations_by_image.pop(img_id, [])
+		self.data.deleted_annos.extend(annos)
+		self.data.deleted_image_ids.add(img_id)
+
+		# Capture the image dict before we remove it so we can write the deleted file later.
+		for img_dict in self.data.instances.get("images", []):
+			if img_dict["id"] == img_id:
+				self._deleted_images_cache.append(img_dict)
+				break
+
+		# Remove from the instances dict too so Key_W writes a clean file.
+		self.data.instances["images"] = [
+			img for img in self.data.instances.get("images", []) if img["id"] != img_id
+		]
+		self.data.instances["annotations"] = [
+			ann for ann in self.data.instances.get("annotations", []) if ann["image_id"] != img_id
+		]
+
+		self._remove_image_from_list(img_id)
+		self.status.showMessage(
+			f"[COCO] Deleted {img_name} ({len(annos)} annos moved to memory). Press W to save.", 5000
+		)
+		logging.info("Deleted (COCO) image_id=%d %s — %d annotations pending flush", img_id, img_name, len(annos))
+		self._advance_after_delete()
+
+	def _remove_image_from_list(self, img_id: int):
+		"""Remove the image with *img_id* from the ImageList."""
+		il = self.data.images
+		il.image_list = [(iid, name) for iid, name in il.image_list if iid != img_id]
+		il.max = len(il.image_list)
+		if il.max == 0:
+			self.status.showMessage("No more images.", 5000)
+			return
+		# Clamp the index so it stays in bounds.
+		il.n = min(il.n, il.max - 1)
+
+	def _advance_after_delete(self):
+		"""Move to the next image after deletion (or wrap to previous if at end)."""
+		il = self.data.images
+		if il.max == 0:
+			self.data.current_image = (None, None)
+			self.update_image(local=False)
+			return
+		# il.n is already clamped; just load whatever is there now.
+		self.data.current_image = il.image_list[il.n]
+		self._clear_selection()
+		self.update_image(local=False)
+
+	def save_annotations(self):
+		"""Write annotation state to disk (COCO mode only, triggered by Key_W).
+
+		Writes two files next to the original annotation file:
+		  - ``<stem>.json``            – kept (surviving) annotations.
+		  - ``<stem>__deleted__.json`` – annotations for deleted images.
+
+		ADE20K mode has no single annotation file to rewrite, so this is a no-op
+		(individual files are already moved on delete).
+		"""
+		if self.data.dataset_format == "ade20k":
+			self.status.showMessage("ADE20K mode: files are moved on delete. Nothing extra to save.", 4000)
+			return
+
+		ann_path = self.data.annotations_file
+		# Always write plain .json regardless of original compression.
+		stem = ann_path.name.split(".")[0]
+		kept_path = ann_path.parent / (stem + ".json")
+		deleted_path = ann_path.parent / (stem + "__deleted__.json")
+
+		kept_instances = dict(self.data.instances)
+		deleted_instances = {
+			"info": kept_instances.get("info", {}),
+			"licenses": kept_instances.get("licenses", []),
+			"images": self._deleted_images_cache,
+			"annotations": self.data.deleted_annos,
+			"categories": kept_instances.get("categories", []),
+		}
+
+		with open(kept_path, "w", encoding="utf-8") as f:
+			json.dump(kept_instances, f)
+		with open(deleted_path, "w", encoding="utf-8") as f:
+			json.dump(deleted_instances, f)
+
+		n_kept = len(kept_instances.get("annotations", []))
+		n_del = len(self.data.deleted_annos)
+		self.status.showMessage(
+			f"Saved: {kept_path.name} ({n_kept} annos kept), "
+			f"{deleted_path.name} ({n_del} annos deleted).",
+			6000,
+		)
+		logging.info("Saved kept annotations → %s", kept_path)
+		logging.info("Saved deleted annotations → %s", deleted_path)
+
+	# ------------------------------------------------------------------
+	# Rendering toggles
+	# ------------------------------------------------------------------
+
 	def toggle_bboxes(self):
 		self.bboxes_on.setChecked(not self.bboxes_on.isChecked())
 		self.update_image()
@@ -862,9 +1302,10 @@ def export_video(data: Data, output_path: str | Path, options: RenderOptions, fp
 
 
 def build_parser() -> argparse.ArgumentParser:
-	parser = argparse.ArgumentParser(description="View images with bboxes from a COCO dataset")
-	parser.add_argument("-i", "--images", default="", type=str, metavar="PATH", help="path to images folder (`basename of annotations` if not specified)")
-	parser.add_argument("-a", "--annotations", default="", type=str, metavar="PATH", help="path to annotations file (.json, .json.gz, .json.bz2, .json.xz)")
+	parser = argparse.ArgumentParser(description="View images with bboxes/masks from COCO or ADE20K-style annotations")
+	parser.add_argument("-i", "--images", default="", type=str, metavar="PATH", help="image root folder; in ADE20K mode this may be the dataset root or the image subtree")
+	parser.add_argument("-a", "--annotations", default="", type=str, metavar="PATH", help="COCO annotation file, ADE JSON file, or ADE JSON root directory")
+	parser.add_argument("--format", choices=("coco", "ade20k"), default="coco", help="annotation format to load")
 	parser.add_argument("--output-video", default="", type=str, metavar="PATH", help="write RGB|mask|bbox video and exit")
 	parser.add_argument("--video-fps", default=2.0, type=float, help="FPS for --output-video")
 	parser.add_argument("--video-codec", default="libx265", type=str, help="FFmpeg codec for --output-video")
@@ -876,6 +1317,17 @@ def build_parser() -> argparse.ArgumentParser:
 	parser.add_argument("--bbox-width", default=3, type=int, help="bbox line width")
 	parser.add_argument("--label-size", default=15, type=int, help="label text size")
 	parser.add_argument("--mask-alpha", default=128, type=int, help="mask alpha, 0-255")
+	parser.add_argument(
+		"--default-show-classes",
+		default="",
+		type=str,
+		metavar="CLASSES",
+		help=(
+			"Comma- or dash-separated list of category names to show by default "
+			"(e.g. 'statue,monument' or 'statue-monument'). "
+			"All other categories are hidden on startup; Shift+Click/Ctrl+Click still work normally."
+		),
+	)
 	return parser
 
 
@@ -894,22 +1346,38 @@ def options_from_args(args: argparse.Namespace) -> RenderOptions:
 def main() -> int:
 	args = build_parser().parse_args()
 	if not args.annotations:
-		logging.error("Please specify at least --annotations (also --images if they're in a different root directory than --annotations).")
+		logging.error("Please specify at least --annotations (also --images if they're in a different root directory than --annotations). In ADE20K mode it may be a directory containing many per-image JSON files.")
 		return 2
 	if not args.images:
-		images = Path(args.annotations).parent
+		annotations_path = Path(args.annotations)
+		images = annotations_path if annotations_path.is_dir() else annotations_path.parent
 	else:
 		images = args.images
 
-	data = Data(images, args.annotations)
+	data = Data(images, args.annotations, dataset_format=args.format)
+
+	if data.images is None or data.annotations_by_image is None or data.categories is None:
+		print(f'Failed to create a data object from annotations in {args.annotations} and images in {args.images if args.images else "<None>"} ')
+		return 1
+
 	options = options_from_args(args)
 
 	if args.output_video:
 		export_video(data, args.output_video, options, args.video_fps, args.video_codec, args.video_crf)
 		return 0
 
+	# Parse --default-show-classes: accept comma- or dash-separated names.
+	default_show_classes: set[str] = set()
+	if args.default_show_classes.strip():
+		raw = args.default_show_classes.strip()
+		# Support both "a,b,c" and "a-b-c" (but not mixed); prefer comma split first.
+		if "," in raw:
+			default_show_classes = {s.strip() for s in raw.split(",") if s.strip()}
+		else:
+			default_show_classes = {s.strip() for s in raw.split("-") if s.strip()}
+
 	app = QtWidgets.QApplication(sys.argv)
-	viewer = ImageViewer(data)
+	viewer = ImageViewer(data, default_show_classes=default_show_classes)
 	viewer.bboxes_on.setChecked(options.bboxes_on)
 	viewer.labels_on.setChecked(options.labels_on)
 	viewer.masks_on.setChecked(options.masks_on)
